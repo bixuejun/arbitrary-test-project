@@ -1,0 +1,276 @@
+<?php
+
+/**
+ * 浏览器友好的变量输出
+ * @param mixed $var 变量
+ * @param boolean $echo 是否输出 默认为True 如果为false 则返回输出字符串
+ * @param string $label 标签 默认为空
+ * @param boolean $strict 是否严谨 默认为true
+ * @return void|string
+ */
+function dump($var, $echo=true, $label=null, $strict=true) {
+    $label = ($label === null) ? '' : rtrim($label) . ' ';
+    if (!$strict) {
+        if (ini_get('html_errors')) {
+            $output = print_r($var, true);
+            $output = '<pre>' . $label . htmlspecialchars($output, ENT_QUOTES) . '</pre>';
+        } else {
+            $output = $label . print_r($var, true);
+        }
+    } else {
+        ob_start();
+        var_dump($var);
+        $output = ob_get_clean();
+        if (!extension_loaded('xdebug')) {
+            $output = preg_replace('/\]\=\>\n(\s+)/m', '] => ', $output);
+            $output = '<pre>' . $label . htmlspecialchars($output, ENT_QUOTES) . '</pre>';
+        }
+    }
+    if ($echo) {
+        echo($output);
+        return null;
+    }else
+        return $output;
+}
+
+/**
+ * 返回13位时间戳，精确到毫秒
+ * @return number
+ */
+function getMillisecond() {
+    list($t1, $t2) = explode(' ', microtime()); //空格分割microtime
+    return (float)sprintf('%.0f',(floatval($t1)+floatval($t2))*1000);
+}
+
+
+/**
+ * 提交json
+ * @param  $url
+ * @param  $post
+ * @return mixed
+ */
+function postJson($url, $post)
+{
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $post);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_TIMEOUT,50);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+        'Content-Type:application/json;charset=utf-8',
+        'Content-Length:'.strlen($post))
+        );
+    $handles = curl_exec($ch);
+    curl_close($ch);
+    return $handles;
+}
+
+/**
+ * 提交普通form
+ * @param  $url
+ * @param  $post
+ * @return mixed
+ */
+function postForm($url, $post)
+{
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $post);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_TIMEOUT,60);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+        'Content-Type:application/x-www-form-urlencoded;charset=utf-8',
+        'Content-Length:'.strlen($post))
+        );
+    $handles = curl_exec($ch);
+    curl_close($ch);
+    return $handles;
+}
+
+/**
+ * get方式访问url
+ * @param  $url
+ * @param  $post
+ * @return mixed
+ */
+function getForm($url)
+{
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_TIMEOUT,60);
+    $handles = curl_exec($ch);
+    curl_close($ch);
+    return $handles;
+}
+
+/**
+ * rsa-sha1 签名算法
+ * @param string $data 待签名数据
+ * @param string $privateKeyPath 私钥证书文件路径
+ * @return string
+ */
+function RSA_SHA1_Sign($data,$privateKeyPath){
+    $key = openssl_pkey_get_private(file_get_contents($privateKeyPath));
+    openssl_sign($data, $sign, $key, OPENSSL_ALGO_SHA1);
+    $sign = base64_encode($sign);
+    return $sign;
+}
+
+/**
+ * rsa-sha1 验签算法
+ * @param string $data 待签名数据
+ * @param string $sign 数据签名
+ * @param string $publicKeyPath 公钥证书文件路径
+ * @return boolean
+ */
+function RSA_SHA1_Verify($data, $sign,$publicKeyPath){
+    $sign = base64_decode($sign);
+    $key = openssl_pkey_get_public(file_get_contents($publicKeyPath));
+    $result = openssl_verify($data, $sign, $key, OPENSSL_ALGO_SHA1) === 1;
+    return $result;
+}
+
+/**
+ * 得到订单号的方法
+ * 应用场合：非集群环境
+ * 规则：当前时间戳，年月日8位+6位流水号 ，例：20160309000001
+ * @return 14位订单号
+ */
+function getOrderId(){
+    $date = date('Ymd',time());
+    $serial_number = getSerialNumberFromFile();
+    $sn_string = str_pad($serial_number,6,"0",STR_PAD_LEFT);
+    return $date . $sn_string;
+}
+
+/**
+ * 从文件中获取流水号
+ * @return string 不固定位数流水号
+ */
+function getSerialNumberFromFile(){
+    $filename = 'order_serial_num.txt';
+    $line_string = file_get_contents($filename);
+    if(empty($line_string)){
+        file_put_contents($filename, 1,LOCK_EX);
+        return 1;
+    }else{
+        if($line_string > 999999){
+            file_put_contents($filename, 1,LOCK_EX);
+            return 1;
+        }else{
+            $data = (int)$line_string + 1;
+            file_put_contents($filename, $data,LOCK_EX);
+            return $data;
+        }
+    }
+}
+
+/**
+ * curl_multi模拟多线程并发GET请求
+ * @param string $url 要并发访问的url
+ * @param number $concurrency 并发度
+ * @return string[]
+ */
+function multiple_threads_get($url,$concurrency=2)
+{
+    $mh = curl_multi_init();
+    $curl_array = array();
+
+    $options = array(
+        CURLOPT_URL => $url,
+    );
+
+    for($i=0;$i<$concurrency;$i++) {
+        $curl_array[$i] = curl_init();
+        curl_setopt($curl_array[$i], CURLOPT_RETURNTRANSFER, true);
+        curl_setopt_array($curl_array[$i], $options);
+        curl_multi_add_handle($mh, $curl_array[$i]);
+    }
+
+    $running = NULL;
+    do {
+        usleep(10000);
+        curl_multi_exec($mh, $running);
+    } while ($running > 0);
+
+    $res = array();
+
+    for($i=0;$i<$concurrency;$i++) {
+        $res[$i] = curl_multi_getcontent($curl_array[$i]);
+    }
+
+    for($i=0;$i<$concurrency;$i++) {
+        curl_multi_remove_handle($mh, $curl_array[$i]);
+    }
+    curl_multi_close($mh);
+    return $res;
+}
+
+/**
+ * curl_multi模拟多线程并发POST请求
+ * @param string $url 请求地址
+ * @param array $postArray 请求参数数组，参数为json格式
+ * @return string[]
+ */
+function multiple_threads_request($url,$postArray)
+{
+    $mh = curl_multi_init();
+    $curl_array = array();
+
+    $concurrency = count($postArray);
+    for($i=0;$i<$concurrency;$i++) {
+        $curl_array[$i] = curl_init();
+
+        $options = array(
+            CURLOPT_URL => $url,
+            CURLOPT_HTTPHEADER => array(
+                'Content-Type:application/json;charset=utf-8',
+                'Content-Length:' . strlen($postArray[$i])
+            ),
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POSTFIELDS => $postArray[$i]
+        );
+
+        curl_setopt_array($curl_array[$i], $options);
+        curl_multi_add_handle($mh, $curl_array[$i]);
+    }
+
+    $running = NULL;
+    do {
+        usleep(10000);
+        curl_multi_exec($mh, $running);
+    } while ($running > 0);
+
+    $res = array();
+
+    for($i=0;$i<$concurrency;$i++) {
+        $res[$i] = curl_multi_getcontent($curl_array[$i]);
+    }
+
+    for($i=0;$i<$concurrency;$i++) {
+        curl_multi_remove_handle($mh, $curl_array[$i]);
+    }
+    curl_multi_close($mh);
+    return $res;
+}
+
+/**
+ * 计算团贷网加密token值
+ * 格式FB-90-9E-5F-0B-76-FB-F1-92-F1-A8-AE-E0-45-CA-A5
+ * @param string $data 待加密原始字符串
+ * @param string $apikey 加密密钥
+ * @return string
+ */
+function computTuandaiHash($data,$apikey){
+    $ps1 = sha1($apikey . strtolower($data));
+    $ps1 = strtoupper($ps1);
+    $s1 = implode(str_split($ps1, 2), '-');
+    $ps2 = md5($s1 . $apikey);
+    $ps2 = strtoupper($ps2);
+    $token = implode(str_split($ps2, 2), '-');
+    return $token;
+}
